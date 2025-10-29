@@ -21,12 +21,17 @@ To integrate the MobileProxy into a Flutter app, follow this excellent tutorial 
 
 ### Web Apps (Experimental)
 
-If you are looking into converting a web site or web app into a censorship-resistant mobile app, look at the [Web App Wrapper](https://github.com/Jigsaw-Code/outline-sdk/tree/main/x/examples/web-wrapper) that we are working on. 
+If you are looking into converting a web site or web app into a censorship-resistant mobile app, look at the [Outline App Maker](https://github.com/Jigsaw-Code/Jigsaw-Code/outline-app-maker). 
 
 ## Add the MobileProxy dependency
+
+### Import natively built libraries
+
+We build and release the Mobileproxy library separately. To learn how to use the pre-compiled version, see the [Mobileproxy SDK Repository](https://github.com/Jigsaw-Code/outline-sdk-mobileproxy#integration)
+
 ### Build the MobileProxy libraries for Android and iOS
 
-First, Build the Go Mobile binaries with [`go build`](https://pkg.go.dev/cmd/go#hdr-Compile_packages_and_dependencies)
+Should you want or need to build Mobileproxy yourself, first build the Go Mobile binaries with [`go build`](https://pkg.go.dev/cmd/go#hdr-Compile_packages_and_dependencies)
 
 From the `x/` directory:
 
@@ -38,15 +43,88 @@ go build -o "$(pwd)/out/" golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/c
 > The Psiphon library is not included in the build by default because the Psiphon codebase uses GPL. To support Psiphon configuration in the Mobile Proxy please build using the [`psiphon` build tag](https://pkg.go.dev/github.com/Jigsaw-Code/outline-sdk/x/psiphon).
 > When integrating Psiphon into your application please work with the Psiphon team at sponsor@psiphon.ca
 
-```bash
-go build -tags psiphon -o "$(pwd)/out/" golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
-```
-
 Then build the iOS and Android libraries with [`gomobile bind`](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile#hdr-Build_a_library_for_Android_and_iOS)
 
 ```bash
 PATH="$(pwd)/out:$PATH" gomobile bind -ldflags='-s -w' -target=ios -iosversion=11.0 -o "$(pwd)/out/mobileproxy.xcframework" github.com/Jigsaw-Code/outline-sdk/x/mobileproxy
 PATH="$(pwd)/out:$PATH" gomobile bind -ldflags='-s -w' -target=android -androidapi=21 -o "$(pwd)/out/mobileproxy.aar" github.com/Jigsaw-Code/outline-sdk/x/mobileproxy
+```
+
+To include Psiphon support please also include the `-tags=psiphon` flag and the psiphon library.
+
+```bash
+PATH="$(pwd)/out:$PATH" gomobile bind -ldflags='-s -w' -target=ios -iosversion=11.0 -tags=psiphon -o "$(pwd)/out/mobileproxy.xcframework" github.com/Jigsaw-Code/outline-sdk/x/mobileproxy github.com/Jigsaw-Code/outline-sdk/x/mobileproxy/psiphon
+PATH="$(pwd)/out:$PATH" gomobile bind -ldflags='-s -w' -target=android -androidapi=21 -tags=psiphon -o "$(pwd)/out/mobileproxy.aar" github.com/Jigsaw-Code/outline-sdk/x/mobileproxy github.com/Jigsaw-Code/outline-sdk/x/mobileproxy/psiphon
+```
+
+Then, in your native code, register Psiphon with your Smart Dialer options.
+
+Android:
+
+```kotlin
+import mobileproxy.Mobileproxy
+import psiphon.Psiphon
+
+// ...
+
+val testDomains = Mobileproxy.newListFromLines("www.google.com\ni.ytimg.com")
+// You can get a Psiphon config from the Psiphon team at sponsor@psiphon.ca.
+val psiphonConfig = "<YOUR_PSIPHON_CONFIG_JSON_HERE>"
+val config = """
+dns:
+  - {system: {}}
+tls:
+  - ""
+fallback:
+  - {"psiphon": \(psiphonConfig)}
+"""
+
+val options = Mobileproxy.newSmartDialerOptions(testDomains, config)
+
+// Register Psiphon
+Psiphon.registerFallbackParser(options, "psiphon")
+
+try {
+    // Create the dialer
+    val dialer = options.newStreamDialer()
+    // ... use the dialer
+} catch (e: Exception) {
+    // Handle error
+}
+```
+
+iOS:
+
+```swift
+import Mobileproxy
+import Psiphon
+
+// ...
+
+let testDomains = MobileproxyNewListFromLines("www.google.com\ni.ytimg.com")
+// You can get a Psiphon config from the Psiphon team at sponsor@psiphon.ca.
+let psiphonConfig = "<YOUR_PSIPHON_CONFIG_JSON_HERE>"
+let config = """
+dns:
+  - {system: {}}
+tls:
+  - ""
+fallback:
+  - {"psiphon": \(psiphonConfig)}
+"""
+
+let options = MobileproxyNewSmartDialerOptions(testDomains, config)
+
+// Register Psiphon
+PsiphonRegisterFallbackParser(options, "psiphon")
+
+do {
+    // Create the dialer
+    let dialer = try options.newStreamDialer()
+    // ... use the dialer
+} catch {
+    // Handle error
+}
 ```
 
 Note: Gomobile expects gobind to be in the PATH, that's why we need to prebuild it, and set up the PATH accordingly.
