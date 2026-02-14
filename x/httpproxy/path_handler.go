@@ -16,6 +16,8 @@ package httpproxy
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -46,6 +48,7 @@ func (h *pathHandler) ServeHTTP(proxyResp http.ResponseWriter, proxyReq *http.Re
 		http.Error(proxyResp, "Invalid target URL", http.StatusBadRequest)
 		return
 	}
+
 	// We create a new request that uses the path of the proxy request.
 	targetReq, err := http.NewRequestWithContext(proxyReq.Context(), proxyReq.Method, targetURL.String(), proxyReq.Body)
 	if err != nil {
@@ -85,5 +88,56 @@ func NewPathHandler(dialer transport.StreamDialer) http.Handler {
 		}
 		return dialer.DialStream(ctx, addr)
 	}
-	return &pathHandler{http.Client{Transport: &http.Transport{DialContext: dialContext}}}
+
+	return &pathHandler{
+		client: http.Client{Transport: &http.Transport{
+			DialContext: dialContext,
+		}},
+	}
+}
+
+// NewPathHandler creates a [http.Handler] that resolves the URL path as an absolute URL using the given [http.Client].
+// A list of trusted names is provided. Each valid certificate valid for a domain in the list is allowed to perform MitM for any request
+func NewPathHandlerWithTrustedDomains(dialer transport.StreamDialer, trustedNames []string) http.Handler {
+	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if !strings.HasPrefix(network, "tcp") {
+			return nil, fmt.Errorf("protocol not supported: %v", network)
+		}
+		return dialer.DialStream(ctx, addr)
+	}
+
+	verify := func(cs tls.ConnectionState, serverName string) error {
+		opts := x509.VerifyOptions{
+			DNSName: serverName,
+			// use default roots
+			Roots:         nil,
+			Intermediates: x509.NewCertPool(),
+		}
+
+		for _, cert := range cs.PeerCertificates[1:] {
+			opts.Intermediates.AddCert(cert)
+		}
+		_, err := cs.PeerCertificates[0].Verify(opts)
+		return err
+	}
+
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			for _, tn := range trustedNames {
+				err := verify(cs, tn)
+				if err == nil {
+					return nil
+				}
+			}
+			return verify(cs, cs.ServerName)
+		},
+	}
+
+	return &pathHandler{
+		client: http.Client{Transport: &http.Transport{
+			DialContext:     dialContext,
+			TLSClientConfig: tlsConfig,
+		}},
+	}
 }

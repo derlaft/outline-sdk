@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.getoutline.org/sdk/x/httpproxy"
@@ -81,6 +82,23 @@ func (p *Proxy) AddURLProxy(path string, dialer *StreamDialer) {
 	// which breaks the URL extraction: https://pkg.go.dev/net/http#hdr-Request_sanitizing.
 	// We can consider forking http.StripPrefix to provide a fallback instead of NotFound, and chaing them.
 	p.proxyHandler.FallbackHandler = http.StripPrefix(path, httpproxy.NewPathHandler(dialer.StreamDialer))
+}
+
+// AddURLProxyWithTrustedDomains works the same way
+// trustedDomains: comma-separated list of certificates allowed to perform MitM
+func (p *Proxy) AddURLProxy2(path string, dialer *StreamDialer, trustedDomains string) {
+	if p.proxyHandler == nil {
+		// Called after Stop. Warn and ignore.
+		log.Println("Called Proxy.AddURLProxy after Stop")
+		return
+	}
+	if len(path) == 0 || path[0] != '/' {
+		path = "/" + path
+	}
+	// TODO(fortuna): Add support for multiple paths. I tried http.ServeMux, but it does request sanitization,
+	// which breaks the URL extraction: https://pkg.go.dev/net/http#hdr-Request_sanitizing.
+	// We can consider forking http.StripPrefix to provide a fallback instead of NotFound, and chaing them.
+	p.proxyHandler.FallbackHandler = http.StripPrefix(path, httpproxy.NewPathHandlerWithTrustedDomains(dialer.StreamDialer, strings.Split(trustedDomains, ",")))
 }
 
 // Stop gracefully stops the proxy service, waiting for at most timeout seconds before forcefully closing it.
